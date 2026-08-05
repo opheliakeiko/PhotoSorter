@@ -3,48 +3,110 @@ import numpy as np
 from PIL import Image
 import cv2
 import os
+import hashlib
+import io
+import zipfile
 
 st.set_page_config(page_title="Automatic Photo Sorter", page_icon="📸")
 
-st.title("📸 Automatic Photo Sorter")
-st.write("Recognizes people and duplicate photos, gone in one click!")
+st.title("📸 Automatic Photo Sorter & Cleaner")
+st.write("Dapat menghapus foto duplikat otomatis dan mengelompokkan foto berwajah ke dalam folder!")
 
-# Menggunakan CascadeClassifier bawaan opencv secara aman
+# File model deteksi wajah dari repository GitHub
 CASCADE_FILE = "haarcascade_frontalface_default.xml"
 
 @st.cache_resource
 def load_detector():
     if os.path.exists(CASCADE_FILE):
-        detector = cv2.CascadeClassifier(CASCADE_FILE)
-        if not detector.empty():
-            return detector
+        try:
+            detector = cv2.CascadeClassifier(CASCADE_FILE)
+            if not detector.empty():
+                return detector
+        except Exception:
+            return None
     return None
 
 detector = load_detector()
 
-if detector is None:
-    st.warning("⚠️ Model deteksi wajah (.xml) sedang dimuat/tidak ditemukan di folder utama. Pastikan file 'haarcascade_frontalface_default.xml' sudah tersimpan di GitHub.")
-
-uploaded_files = st.file_uploader("Upload your photos!", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload foto-foto kamu di sini", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
 
 if uploaded_files:
-    st.success(f"Berhasil mengunggah {len(uploaded_files)} foto!")
+    st.info(f"Total file diunggah: {len(uploaded_files)} foto.")
     
+    # Variabel pelacak duplikat dan penyimpan hasil
+    seen_hashes = set()
+    unique_files = []
+    duplicate_count = 0
+    
+    # 1. PROSES DETEKSI DUPLIKAT
     for uploaded_file in uploaded_files:
-        # Konversi file upload Streamlit ke format yang dibaca OpenCV
-        image_pil = Image.open(uploaded_file).convert('RGB')
-        img_np = np.array(image_pil)
-        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        bytes_data = uploaded_file.read()
+        # Hitung hash MD5 dari isi file
+        file_hash = hashlib.md5(bytes_data).hexdigest()
         
-        faces = []
-        if detector is not None and not detector.empty():
-            faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
-        
-        st.subheader(f"File: {uploaded_file.name}")
-        if len(faces) > 0:
-            st.write(f"✅ Ditemukan **{len(faces)} wajah**! (Kategori: Foto Orang)")
+        if file_hash in seen_hashes:
+            duplicate_count += 1
         else:
-            st.write("📁 Tidak ada wajah terdeteksi. (Kategori: Gambar Umum/Sisa)")
+            seen_hashes.add(file_hash)
+            # Simpan file unik kembali untuk diproses
+            uploaded_file.seek(0)
+            unique_files.append(uploaded_file)
             
-        st.image(image_pil, width=300)
-        st.divider()
+    if duplicate_count > 0:
+        st.warning(f"🧹 Berhasil mendeteksi dan mengabaikan **{duplicate_count} foto duplikat**!")
+    else:
+        st.success("✅ Tidak ditemukan foto duplikat.")
+        
+    st.write(f"Sisa foto bersih yang diproses: **{len(unique_files)} foto**.")
+    st.divider()
+
+    # 2. PROSES SORTIR WAJAH & PENYIAPAN ZIP
+    zip_buffer = io.BytesIO()
+    
+    people_count = 0
+    other_count = 0
+    
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for uploaded_file in unique_files:
+            image_pil = Image.open(uploaded_file).convert('RGB')
+            img_np = np.array(image_pil)
+            gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+            
+            faces = []
+            if detector is not None:
+                faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
+            
+            # Tentukan folder tujuan di dalam file ZIP
+            if len(faces) > 0:
+                folder_target = "Foto_Orang"
+                people_count += 1
+                status_text = f"✅ Ada {len(faces)} wajah ➔ Dimasukkan ke `Foto_Orang/`"
+            else:
+                folder_target = "Foto_Lainnya"
+                other_count += 1
+                status_text = "📁 Tidak ada wajah ➔ Dimasukkan ke `Foto_Lainnya/`"
+                
+            # Simpan file ke dalam ZIP
+            img_byte_arr = io.BytesIO()
+            image_pil.save(img_byte_arr, format=image_pil.format if image_pil.format else 'JPEG')
+            zip_file.writestr(f"{folder_target}/{uploaded_file.name}", img_byte_arr.getvalue())
+            
+            # Tampilkan Ringkasan di Layar
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.image(image_pil, width=150)
+            with col2:
+                st.subheader(uploaded_file.name)
+                st.write(status_text)
+            st.divider()
+
+    # 3. TOMBOL DOWNLOAD HASIL SORTIRAN (ZIP)
+    st.subheader("📦 Unduh Hasil Sortir & Bebas Duplikat")
+    st.write(f"Ringkasan: **{people_count} Foto Orang** | **{other_count} Foto Lainnya** | **{duplicate_count} Duplikat Dibuang**")
+    
+    st.download_button(
+        label="⬇️ Download File ZIP Foto Rapi",
+        data=zip_buffer.getvalue(),
+        file_name="Foto_Sudah_Dirapikan.zip",
+        mime="application/zip"
+    )
