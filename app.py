@@ -9,7 +9,7 @@ import zipfile
 st.set_page_config(page_title="Automatic Photo Sorter Pro", page_icon="📸", layout="wide")
 
 st.title("📸 Automatic Photo Sorter Pro")
-st.write("Mendeteksi duplikat visual, memisahkan foto sendiri per orang, serta memisahkan foto rame-rame ke folder **Foto Rombongan**!")
+st.write("Mendeteksi duplikat visual, memisahkan foto sendiri per orang, serta memisahkan foto bareng-bareng ke folder **Foto Rombongan**!")
 
 # File model deteksi wajah
 CASCADE_FILE = "haarcascade_frontalface_default.xml"
@@ -165,4 +165,29 @@ if uploaded_files:
             pil_img.save(img_byte_arr, format='JPEG')
             zip_file.writestr(f"{folder_target}/{filename}", img_byte_arr.getvalue())
             
-            col1, col2 = st.
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                st.image(pil_img, width=120)
+            with col2:
+                st.write(f"**{filename}**")
+                st.write(status_text)
+            st.divider()
+
+    # --- RINGKASAN & DOWNLOAD ---
+    st.subheader("📦 Unduh Hasil Sortir")
+    
+    col_stat1, col_stat2 = st.columns(2)
+    with col_stat1:
+        st.write("📊 **Rincian Folder:**")
+        for folder_name, count in folder_summary.items():
+            st.write(f"- `{folder_name}/`: **{count} foto**")
+    with col_stat2:
+        st.write(f" Total Orang Berbeda (Foto Sendiri): **{len(person_histograms)} Orang**")
+        st.write(f" Total Duplikat Dibuang: **{duplicate_count} Foto**")
+        
+    st.download_button(
+        label="⬇️ Download File ZIP Hasil Sortir",
+        data=zip_buffer.getvalue(),
+        file_name="Foto_Sudah_Dirapikan.zip",
+        mime="application/zip"
+    )
